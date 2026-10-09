@@ -1,0 +1,15 @@
+glmnet=2.2.1
+h5py==3.12.1
+lightgbm==4.6.0
+numpy==1.26.4
+pandas2.2.3
+scikit-image==0.24.0
+sklearn==1.5.2
+scipy==1.13.1
+shap==0.48.0
+statsmodels==0.14.4
+tensorboard==2.19.0
+tensorboard-data-server==0.7.2
+torch==2.5.1
+torchaudio==2.5.1
+torchvision==0.20.1

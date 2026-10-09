@@ -1,1 +1,131 @@
-# Rare-variant-PRSs
+## Rare-variant risk scores complement common-variant polygenic scores for disease risk prediction and stratification
+In this work, building on recent advances in functional annotation of both coding and noncoding regions (e.g., the STAAR framework), we comprehensively evaluate linear and nonlinear approaches for constructing rare-variant PRS and assess their predictive performance across 31 complex traits and 464 disease endpoints using WGS data from the UK Biobank. We examine performance at both the population level, and, critically, at the individual level, and perform longitudinal survival analyses.
+
+> **Note on example data:** All example tables in this README contain **synthetic data** created solely to illustrate the required file formats. They do **not** contain any real UK Biobank participant data. Any resemblance to real individuals is coincidental.
+
+## Getting Started
+- Clone this repository using the following git command:
+```
+git clone https://github.com/qin1114/Rare-variant-PRS.git
+```
+- Alternatively, download the source files from the github website (https://github.com/qin1114/Rare-variant-PRS/tree/main)
+
+
+## Data Preprocessing
+To generate burden scores input, please follow [STAARpipeline](https://github.com/li-lab-genetics/STAAR):
+1. Generate Genomic Data Structure (GDS) file follow [STAARpipeline-Tutorial](https://github.com/xihaoli/STAARpipeline-Tutorial)
+<br/>
+
+2. Note that we use burden scores, which means we do not need to incorporate weights during variant aggregation. You can simply run codes in ./STAARpipeline to generate npz files for 22 chromosomes. For example:
+```
+R --slave --no-restore --file=STAARpipeline_Gene_Centric_Coding.R --args 22 0.01 
+../../data/STAARpipeline/ ../../results/STAARpipeline 
+```
+
+3. Run data_preprocessing.py to generate final npz input data used for rvPRS models across phenotypes. File of covariates should be provided in order to be regressed across quantitative traits, these covariate-regressed phenotype will be used for all downstream analysis.
+```
+python data_preprocessing.py -cutoff 0.01 -rare_gene Coding -pheno_name X30610 -trait Continuous 
+-save_dir ../../data -cov_file ../../data/cov_data.csv -split_dir ../../data/split/ 
+-data_dir ../../STAARpipeline/Step_3/cutoff_0.01/Coding 
+-data_noncoding_dir ../../data/STAARpipeline/Step_3/cutoff_0.01/Noncoding/NPY_FILE 
+```
+
+- cov_file: Full path and the file name of the covariates, should include eid, 21003-0.0 (age), 31-0.0 (sex) 22009-0.{1-10}, the file must have the following format (including the header line):
+**The example below uses synthetic data for format illustration only.**
+```
+eid       31-0.0  21003-0.0  22009-0.1  22009-0.2  22009-0.3  22009-0.4  22009-0.5  22009-0.6  22009-0.7  22009-0.8  22009-0.9  22009-0.10
+UKB_0001         0         50        0.0        0.0        0.0        0.0        0.0        0.0        0.0        0.0        0.0         0.0
+UKB_0002         1         46        0.1        0.1        0.1        0.1        0.1        0.1        0.1        0.1        0.1         0.1
+UKB_0003         1         64       -0.1       -0.1       -0.1       -0.1       -0.1       -0.1       -0.1       -0.1       -0.1        -0.1
+UKB_0004         0         60        0.2        0.2        0.2        0.2        0.2        0.2        0.2        0.2        0.2         0.2
+UKB_0005         0         56       -0.2       -0.2       -0.2       -0.2       -0.2       -0.2       -0.2       -0.2       -0.2        -0.2
+```
+
+<br/>
+
+
+## PRScs
+We generate common-variant PRS using [PRScs](https://github.com/getian107/PRScs):
+- Prepare snplist matched between common variants in WGS and HapMap3 first, we provide the HMap3 list aligned with GRCh37/hg19 in ./data/map.rd. Run match_HM3_rsid.R to obtained matched snplist.
+- Please run [PRScs](https://github.com/getian107/PRScs) according to its instruction. The cvPRS results must have the following format (including the header line):
+**The example below uses synthetic data for format illustration only.**
+```
+IID	FID	X30610	SCORE
+UKB_0001_UKB_0001	0	0.0	0.0
+UKB_0002_UKB_0002	0	0.0	0.0
+UKB_0003_UKB_0003	0	0.0	0.0
+UKB_0004_UKB_0004	0	0.0	0.0
+```
+
+
+<br/>
+
+
+## Model Training
+We provide training code for five predictive models of quantitative or disease traits. Take LightGBM as an example:
+```
+python train_disease_LightGBM.py -cutoff 0.01 -disease_select E4_DM2 -rare_gene Coding 
+-split_dir ../../data/split -save_dir ../../results/LightGBM -data_dir ../../data/ 
+
+python train_quantitative_LightGBM.py -cutoff 0.01 -pheno_name X30610 -rare_gene Coding 
+-split_dir ../../data/split -save_dir ../../results/LightGBM -data_dir ../../data/
+```
+
+- split_dir: Folder path of dataset split, which contain {pheno_name}/data_split.csv file. This file should include eid, pheno_name and split, and must have the following format (including the header line):
+**The example below uses synthetic data for format illustration only.**
+```
+eid,X30610,split
+UKB_0001,0.0,test
+UKB_0002,0.0,train
+UKB_0003,0.0,test
+UKB_0004,0.0,train
+UKB_0005,0.0,val
+```
+
+- data_dir: Folder path of npz burden files generated by data_preprocessing.py.
+
+Hyperparameters are looped automatically. You can also manually configure parameters for RVTrans as follows:
+```
+python train_quantitative_RVTrans.py -cutoff 0.01 -rare_gene Coding -device cuda:0 -pheno_name X30610
+-split_dir ../../data/split -save_dir ../../results/RVTrans -data_dir ../../data/ 
+-accumulation_step 8 -depth 12 -patch_size 64
+```
+
+<br/>
+
+## Model Evaluation
+Prediction performance was assessed using three complementary metrics: (i) the correlation R between predicted and observed phenotypes (on the liability scale for disease traits); (ii) the odds ratio (OR) comparing individuals in the top 1% of the rvPRS distribution with the remainder of the sample; and (iii) the integrated discrimination improvement (IDI) obtained when adding rvPRS to a model that already included cvPRS, using the top 1% as the risk threshold. 
+```
+python evaluate_quantitative_performance.py -model_name LightGBM -cutoff 0.01 -rare_gene Coding 
+-cov_file ../data/cov_data.csv -pheno_file ../data/pheno_ls_5%.txt 
+-save_dir ../results/ -model_file ../../results  -cvprs_file ../results/PRS-CS/Continuous
+-split_dir ../data/split
+
+python evaluate_disease_performance.py -model_name LightGBM -cutoff 0.01 -rare_gene Coding
+-cov_file ../../data/cov_data.csv -pheno_file ../../data/pheno_ls_5%.txt 
+-save_dir ../../results/ -model_file ../../results -cvprs_file ../../results/PRS-CS_new/Binary 
+-split_dir ../../data/split 
+
+```
+- pheno_file: txt with one column of phenotypes to evaluate (no header line).
+
+
+<br/>
+
+The importance of features was assessed by SHapley Additive exPlanations (SHAP) for LightGBM and saliency gradient value for RVTrans.
+```
+python visual_shap.py -cutoff 0.01 -pheno_name X30610 -rare_gene Coding 
+-data_dir ../../data/ -save_dir ../../results/ -model_file ../../results/LightGBM/ 
+-split_dir ../../data/split 
+
+python visual_RVTrans_saliency_disease.py -accumulation_step 8 -patch_size 64 -depth 6 
+-cutoff 0.01 -rare_gene Coding -device cuda:0 -disease_select E4_DM2 -data_dir ../../data/ 
+-save_dir ../../results/RVTrans -split_dir ../../data/split 
+
+python visual_RVTrans_saliency_quantitative.py -accumulation_step 8 -patch_size 32 -depth 6 
+-cutoff 0.01 -rare_gene Coding -device cuda:0 -pheno_name X30610 -data_dir ../../data/ 
+-save_dir ../../results/RVTrans -split_dir ../../data/split 
+```
+
+<br/>
+
